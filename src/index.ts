@@ -10,6 +10,10 @@ const isVercelRuntime = process.env.VERCEL === '1';
 let runtimeInitPromise: Promise<void> | null = null;
 
 app.use(express.json());
+app.use((_request: Request, response: Response, next) => {
+  response.type('application/json');
+  next();
+});
 
 app.get('/', (_request: Request, response: Response) => {
   response.json({
@@ -44,6 +48,12 @@ app.use(async (_request: Request, response: Response, next) => {
 });
 
 app.use('/api', apiRouter); 
+
+app.use((_request: Request, response: Response) => {
+  response.status(404).json({
+    message: 'Not found'
+  });
+});
 
 function logReadyApis(): void {
   logger.info('APIs ready to use:');
