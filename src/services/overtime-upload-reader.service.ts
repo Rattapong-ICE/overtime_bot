@@ -1,6 +1,6 @@
 import path from 'node:path';
 import ExcelJS from 'exceljs';
-import pdfParse from 'pdf-parse';
+import { PDFParse } from 'pdf-parse';
 import { parse as parseCsv } from 'csv-parse/sync';
 
 type TimesheetJsonRow = Record<string, string>;
@@ -118,116 +118,14 @@ async function parseXlsxTimesheet(buffer: Buffer): Promise<TimesheetJsonRow[]> {
 }
 
 async function parsePdfText(buffer: Buffer): Promise<string> {
-  const textResult = await pdfParse(buffer);
-  return textResult.text.trim();
-}
+  const parser = new PDFParse({ data: new Uint8Array(buffer) });
 
-function normalizeTime(value: string): string {
-  const normalized = value.replace('.', ':').trim();
-  const match = /^(\d{1,2}):(\d{2})$/.exec(normalized);
-  if (!match) {
-    return normalized;
+  try {
+    const textResult = await parser.getText();
+    return textResult.text.trim();
+  } finally {
+    await parser.destroy();
   }
-
-  const hour = Number(match[1]);
-  const minute = Number(match[2]);
-  if (!Number.isInteger(hour) || !Number.isInteger(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
-    return normalized;
-  }
-
-  return `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
-}
-
-function extractDayNumber(value: string): number | null {
-  const token = value.replace(/[.,;:()\[\]{}]/g, '').trim();
-
-  const dayOnlyMatch = /^(\d{1,2})$/.exec(token);
-  if (dayOnlyMatch) {
-    const day = Number(dayOnlyMatch[1]);
-    return day >= 1 && day <= 31 ? day : null;
-  }
-
-  const dateMatch = /^(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?$/.exec(token);
-  if (dateMatch) {
-    const day = Number(dateMatch[1]);
-    return day >= 1 && day <= 31 ? day : null;
-  }
-
-  return null;
-}
-
-function isTimeToken(value: string): boolean {
-  return /^(\d{1,2})[:.](\d{2})$/.test(value.trim());
-}
-
-function extractCompactTripleTimes(value: string): { from: string; to: string; hours: string } | null {
-  const token = value.trim();
-  const match = /^(\d{1,2}[:.]\d{2})(\d{1,2}[:.]\d{2})(\d{1,2}[:.]\d{2})$/.exec(token);
-  if (!match) {
-    return null;
-  }
-
-  return {
-    from: normalizeTime(match[1]),
-    to: normalizeTime(match[2]),
-    hours: normalizeTime(match[3])
-  };
-}
-
-function parsePdfTableRowsFromWholeText(pdfText: string): PdfTableRow[] {
-  const rows: PdfTableRow[] = [];
-  const tokens = pdfText
-    .replace(/\r?\n/g, ' ')
-    .split(/\s+/)
-    .map((token) => token.trim())
-    .filter((token) => token !== '');
-
-  for (let index = 0; index < tokens.length; index += 1) {
-    const dayNumber = extractDayNumber(tokens[index]);
-    if (dayNumber === null) {
-      continue;
-    }
-
-    const next1 = tokens[index + 1] ?? '';
-    const next2 = tokens[index + 2] ?? '';
-    const next3 = tokens[index + 3] ?? '';
-
-    let from = '';
-    let to = '';
-    let hours = '';
-
-    const compactTriple = extractCompactTripleTimes(next1);
-    const timeRangeMatch = /^(\d{1,2}[:.]\d{2})-(\d{1,2}[:.]\d{2})$/.exec(next1);
-    if (compactTriple) {
-      from = compactTriple.from;
-      to = compactTriple.to;
-      hours = compactTriple.hours;
-    } else if (timeRangeMatch && isTimeToken(next2)) {
-      from = normalizeTime(timeRangeMatch[1]);
-      to = normalizeTime(timeRangeMatch[2]);
-      hours = normalizeTime(next2);
-    } else if (isTimeToken(next1) && isTimeToken(next2) && isTimeToken(next3)) {
-      from = normalizeTime(next1);
-      to = normalizeTime(next2);
-      hours = normalizeTime(next3);
-    }
-
-    if (!from || !to || !hours) {
-      continue;
-    }
-
-    rows.push({
-      day: String(dayNumber),
-      from,
-      to,
-      hours,
-      description: '',
-      remark: '',
-      rawLine: `${dayNumber} ${from} ${to} ${hours}`
-    });
-  }
-
-  return rows;
 }
 
 function parsePdfTableRows(pdfText: string): PdfTableRow[] {
@@ -243,15 +141,6 @@ function parsePdfTableRows(pdfText: string): PdfTableRow[] {
   const stopLinePattern = /(ลงชื่อ|signature|พนักงาน|employee|หัวหน้างาน|supervisor|client authorized approval|classification|employee over time document|as of month|client project name|department|date\s*\/\s*time|description|remark|หมายเหตุ)/i;
 
   for (const line of lines) {
-    const compactTriple = extractCompactTripleTimes(line);
-    if (compactTriple && currentRow && !currentRow.from && !currentRow.to && !currentRow.hours) {
-      currentRow.from = compactTriple.from;
-      currentRow.to = compactTriple.to;
-      currentRow.hours = compactTriple.hours;
-      currentRow.rawLine = `${currentRow.day} ${compactTriple.from} ${compactTriple.to} ${compactTriple.hours}`;
-      continue;
-    }
-
     const rowWithTimeMatch = line.match(rowWithTimePattern);
     if (rowWithTimeMatch && rowWithTimeMatch.groups) {
       const dayNumber = Number(rowWithTimeMatch.groups.day);
@@ -261,9 +150,9 @@ function parsePdfTableRows(pdfText: string): PdfTableRow[] {
 
       currentRow = {
         day: rowWithTimeMatch.groups.day,
-        from: normalizeTime((rowWithTimeMatch.groups.from ?? '').trim()),
-        to: normalizeTime((rowWithTimeMatch.groups.to ?? '').trim()),
-        hours: normalizeTime((rowWithTimeMatch.groups.hours ?? '').trim()),
+        from: (rowWithTimeMatch.groups.from ?? '').trim(),
+        to: (rowWithTimeMatch.groups.to ?? '').trim(),
+        hours: (rowWithTimeMatch.groups.hours ?? '').trim(),
         description: (rowWithTimeMatch.groups.description ?? '').trim(),
         remark: '',
         rawLine: `${rowWithTimeMatch.groups.day} ${rowWithTimeMatch.groups.from} ${rowWithTimeMatch.groups.to} ${rowWithTimeMatch.groups.hours}`
@@ -315,11 +204,6 @@ function parsePdfTableRows(pdfText: string): PdfTableRow[] {
     currentRow.description = currentRow.description
       ? `${currentRow.description} ${continuation}`
       : continuation;
-  }
-
-  const hasTimedRows = rows.some((row) => row.from || row.to || row.hours);
-  if (!hasTimedRows) {
-    return parsePdfTableRowsFromWholeText(pdfText);
   }
 
   return rows;

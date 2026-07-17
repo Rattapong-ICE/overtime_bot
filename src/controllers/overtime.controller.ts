@@ -86,14 +86,14 @@ export async function generateOvertimeTemplateFile(request: Request, response: R
     }
 
     const data = await readUploadedOvertimeFiles(timesheetFile, sheetOtPdfFile);
-    // logger.info(
-    //   {
-    //     timesheetFileName: data.timesheet.fileName,
-    //     timesheetCount: data.timesheet.rows.length
-    //   },
-    //   'Timesheet data loaded for template generation'
-    // );
-
+    logger.info(
+      {
+        timesheetFileName: data.timesheet.fileName,
+        timesheetCount: data.timesheet.rows.length
+      },
+      'Timesheet data loaded for template generation'
+    );
+    
     // logger.info(
     //   {
     //     pdfFileName: data.sheetOtPdf.fileName,

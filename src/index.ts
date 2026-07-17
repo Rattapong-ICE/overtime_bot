@@ -1,17 +1,13 @@
-import dotenv from 'dotenv';
+import 'dotenv/config';
 import path from 'node:path';
 import express, { type Request, type Response } from 'express';
 import { apiRouter, REGISTERED_API_ENDPOINTS } from './api/api.module';
 import { connectDatabase } from './config/database';
 import { logger } from './lib/logger';
 
-const isVercelRuntime = process.env.VERCEL === '1';
-if (!isVercelRuntime) {
-  dotenv.config();
-}
-
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
+const isVercelRuntime = process.env.VERCEL === '1';
 let runtimeInitPromise: Promise<void> | null = null;
 
 app.use(express.json());
