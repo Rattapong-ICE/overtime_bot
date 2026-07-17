@@ -1,32 +1,30 @@
-import { existsSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { cert, getApps, initializeApp, type ServiceAccount } from 'firebase-admin/app';
 import { getStorage } from 'firebase-admin/storage';
 
-const DEFAULT_SERVICE_ACCOUNT_FILE = 'firebase.json';
-
 type FirebaseUploadResult = {
   storagePath: string;
-  gsUri: string;
   downloadUrl: string;
 };
 
 type ServiceAccountWithProjectId = ServiceAccount & {
   project_id?: string;
+  private_key?: string;
 };
 
 let cachedServiceAccount: ServiceAccountWithProjectId | null = null;
 
-function getServiceAccountPath(): string {
-  const configuredPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH?.trim();
-  if (configuredPath) {
-    return path.isAbsolute(configuredPath)
-      ? configuredPath
-      : path.join(process.cwd(), configuredPath);
+function normalizeServiceAccount(serviceAccount: ServiceAccountWithProjectId): ServiceAccountWithProjectId {
+  if (typeof serviceAccount.private_key === 'string' && !serviceAccount.privateKey) {
+    serviceAccount.privateKey = serviceAccount.private_key;
   }
 
-  return path.join(process.cwd(), DEFAULT_SERVICE_ACCOUNT_FILE);
+  if (typeof serviceAccount.privateKey === 'string') {
+    serviceAccount.privateKey = serviceAccount.privateKey.replaceAll(String.raw`\n`, '\n');
+  }
+
+  return serviceAccount;
 }
 
 function getErrorMessage(error: unknown): string {
@@ -34,7 +32,39 @@ function getErrorMessage(error: unknown): string {
     return error.message;
   }
 
-  return String(error);
+  if (typeof error === 'string') {
+    return error;
+  }
+
+  if (error && typeof error === 'object') {
+    try {
+      return JSON.stringify(error);
+    } catch {
+      return 'Unknown object error';
+    }
+  }
+
+  return 'Unknown error';
+}
+
+function getServiceAccountFromEnv(): ServiceAccountWithProjectId | null {
+  const oneLineJson = process.env.FIREBASE_JSON?.trim();
+
+  if (!oneLineJson) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(oneLineJson) as ServiceAccountWithProjectId;
+    return normalizeServiceAccount(parsed);
+  } catch (error) {
+    throw new Error(
+      'Invalid Firebase JSON in env. '
+        + 'Expected one-line JSON in FIREBASE_JSON. '
+        + `Details: ${getErrorMessage(error)}`,
+      { cause: error }
+    );
+  }
 }
 
 function shouldTryNextBucket(error: unknown): boolean {
@@ -83,13 +113,13 @@ function getFirebaseServiceAccount(): ServiceAccountWithProjectId {
     return cachedServiceAccount;
   }
 
-  const serviceAccountPath = getServiceAccountPath();
-  if (!existsSync(serviceAccountPath)) {
-    throw new Error(`Firebase service account file not found: ${serviceAccountPath}`);
+  const envServiceAccount = getServiceAccountFromEnv();
+  if (envServiceAccount) {
+    cachedServiceAccount = envServiceAccount;
+    return cachedServiceAccount;
   }
 
-  cachedServiceAccount = require(serviceAccountPath) as ServiceAccountWithProjectId;
-  return cachedServiceAccount;
+  throw new Error('Missing FIREBASE_JSON in environment. Expected one-line Firebase service account JSON.');
 }
 
 function initializeFirebaseApp(): void {
@@ -130,7 +160,6 @@ export async function uploadGeneratedFileToFirebase(localFilePath: string, stora
 
       return {
         storagePath: targetPath,
-        gsUri: "",
         downloadUrl
       };
     } catch (error) {
