@@ -34,10 +34,18 @@ type DailyWorkSummary = {
   hasLeave: boolean;
 };
 
+type UserProfileInput = {
+  username: string;
+  name: string;
+  company: string;
+  team: string;
+};
+
 type DaySummaryAccumulator = {
   hasWork: boolean;
   hasLeave: boolean;
   isWeekend: boolean;
+  isOffDay: boolean;
   period1ClockIn: string;
   period1ClockOut: string;
   hasAnyClockInOut: boolean;
@@ -94,6 +102,10 @@ function getMonthMetaFromInput(targetMonth?: string): { year: number; monthIndex
     monthIndex: monthNumber - 1,
     monthLabel: `${year}-${pad2(monthNumber)}`
   };
+}
+
+function sanitizeFilePart(value: string): string {
+  return value.trim().replace(/[^a-zA-Z0-9_-]+/g, '_').replace(/^_+|_+$/g, '');
 }
 
 function applyBorder(cell: ExcelJS.Cell): void {
@@ -328,12 +340,34 @@ function buildDailyPdfSummary(pdfRows: PdfTableInputRow[]): Map<number, PdfTable
 export async function generateOvertimeTemplateXlsx(
   targetMonth?: string,
   timesheetRows: TimesheetInputRow[] = [],
-  pdfTableRows: PdfTableInputRow[] = []
+  pdfTableRows: PdfTableInputRow[] = [],
+  userProfile?: UserProfileInput,
+  holidayDates: string[] = []
 ): Promise<TemplateGenerationResult> {
   const { year, monthIndex, monthLabel } = getMonthMetaFromInput(targetMonth);
   const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
   const dailyWorkSummary = buildDailyWorkSummary(timesheetRows, year, monthIndex);
   const dailyPdfSummary = buildDailyPdfSummary(pdfTableRows);
+  const holidayDays = new Set(
+    holidayDates
+      .map((value) => {
+        const [holidayYearText, holidayMonthText, holidayDayText] = value.split('-');
+        const holidayYear = Number(holidayYearText);
+        const holidayMonth = Number(holidayMonthText);
+        const holidayDay = Number(holidayDayText);
+
+        if (holidayYear !== year || holidayMonth !== monthIndex + 1) {
+          return null;
+        }
+
+        if (!Number.isInteger(holidayDay) || holidayDay < 1 || holidayDay > 31) {
+          return null;
+        }
+
+        return holidayDay;
+      })
+      .filter((day): day is number => day !== null)
+  );
 
   const workbook = new ExcelJS.Workbook();
   const worksheet = workbook.addWorksheet('Overtime');
@@ -374,6 +408,10 @@ export async function generateOvertimeTemplateXlsx(
   worksheet.getCell('G4').value = 'Month :';
   worksheet.mergeCells('H4:I4');
   worksheet.getCell('H4').value = monthLabel;
+  worksheet.getCell('B3').value = userProfile?.username ?? '';
+  worksheet.getCell('G3').value = userProfile?.name ?? '';
+  worksheet.getCell('B4').value = userProfile?.company ?? '';
+  worksheet.getCell('E4').value = userProfile?.team ?? '';
 
   for (const labelCell of ['A3', 'F3', 'A4', 'D4', 'G4']) {
     worksheet.getCell(labelCell).font = { name: FONT_NAME, size: 12, bold: true };
@@ -444,10 +482,13 @@ export async function generateOvertimeTemplateXlsx(
     const rowIndex = startRow + day - 1;
     const dayOfWeek = new Date(Date.UTC(year, monthIndex, day)).getUTCDay();
     const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+    const isHoliday = holidayDays.has(day);
+    const isOffDay = isWeekend || isHoliday;
     const daySummary: DaySummaryAccumulator = {
       hasWork: false,
       hasLeave: false,
       isWeekend,
+      isOffDay,
       period1ClockIn: '',
       period1ClockOut: '',
       hasAnyClockInOut: false,
@@ -467,7 +508,7 @@ export async function generateOvertimeTemplateXlsx(
     for (let column = 1; column <= 17; column += 1) {
       const cell = worksheet.getRow(rowIndex).getCell(column);
       cell.font = { name: FONT_NAME, size: 12 };
-      if (isWeekend) {
+      if (isOffDay) {
         cell.fill = {
           type: 'pattern',
           pattern: 'solid',
@@ -507,11 +548,6 @@ export async function generateOvertimeTemplateXlsx(
           }
           daySummary.totalMinutes += workedMinutes;
           daySummary.hasWork = workedMinutes > 0;
-
-          const period1Classified = classifyMinutesByDayType(period1Start, period1End, isWeekend);
-          daySummary.x1Minutes += period1Classified.x1Minutes;
-          daySummary.x15Minutes += period1Classified.x15Minutes;
-          daySummary.x3Minutes += period1Classified.x3Minutes;
         }
       }
 
@@ -536,7 +572,7 @@ export async function generateOvertimeTemplateXlsx(
         daySummary.totalMinutes += workedMinutes;
         daySummary.hasWork = workedMinutes > 0 || daySummary.hasWork;
 
-        const period2Classified = classifyMinutesByDayType(period2Start, period2End, isWeekend);
+        const period2Classified = classifyMinutesByDayType(period2Start, period2End, isOffDay);
         daySummary.x1Minutes += period2Classified.x1Minutes;
         daySummary.x15Minutes += period2Classified.x15Minutes;
         daySummary.x3Minutes += period2Classified.x3Minutes;
@@ -608,10 +644,10 @@ export async function generateOvertimeTemplateXlsx(
   const totalWorkedMinutes = Array.from(daySummaries.values()).reduce((sum, daySummary) => sum + daySummary.totalMinutes, 0);
   const leaveDays = Array.from(daySummaries.values()).filter((daySummary) => daySummary.hasLeave).length;
   const absentDays = Array.from(daySummaries.values()).filter(
-    (daySummary) => !daySummary.isWeekend && !daySummary.hasLeave && !daySummary.hasAnyClockInOut
+    (daySummary) => !daySummary.isOffDay && !daySummary.hasLeave && !daySummary.hasAnyClockInOut
   ).length;
   const lateOrEarlyDays = Array.from(daySummaries.values()).filter(
-    (daySummary) => !daySummary.isWeekend && !daySummary.hasLeave && daySummary.period1ClockOut !== '' && daySummary.period1ClockOut !== '17:30'
+    (daySummary) => !daySummary.isOffDay && !daySummary.hasLeave && daySummary.period1ClockOut !== '' && daySummary.period1ClockOut !== '17:30'
   ).length;
 
   const x1Minutes = Array.from(daySummaries.values()).reduce((sum, daySummary) => sum + daySummary.x1Minutes, 0);
@@ -708,7 +744,9 @@ export async function generateOvertimeTemplateXlsx(
 
   await mkdir(outputDirectory, { recursive: true });
 
-  const fileName = `overtime-template-${monthLabel}.xlsx`;
+  const fileUsername = sanitizeFilePart(userProfile?.username ?? 'unknown');
+  const fileDate = sanitizeFilePart(monthLabel);
+  const fileName = `timesheet_${fileUsername}_${fileDate}.xlsx`;
   const filePath = path.join(outputDirectory, fileName);
   await workbook.xlsx.writeFile(filePath);
 

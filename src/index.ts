@@ -39,7 +39,7 @@ function initRuntime(): Promise<void> {
   return runtimeInitPromise;
 }
 
-app.use('/api/employees', async (_request: Request, response: Response, next) => {
+app.use('/api', async (_request: Request, response: Response, next) => {
   try {
     await initRuntime();
     next();

@@ -8,6 +8,8 @@ import {
 import { generateOvertimeTemplateXlsx as buildOvertimeTemplateXlsx } from '../services/overtime-template.service';
 import { uploadGeneratedFileToFirebase } from '../services/firebase-storage.service';
 import { readUploadedOvertimeFiles } from '../services/overtime-upload-reader.service';
+import { findUserByUsername } from '../services/user.service';
+import { listEnabledHolidaysByMonth } from '../services/holiday.service';
 import { logger } from '../lib/logger';
 
 const employeeParamsSchema = z.object({
@@ -16,6 +18,7 @@ const employeeParamsSchema = z.object({
 
 const templateBodySchema = z.object({
   date: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
+  username: z.string().trim().min(1),
   text_ot: z.string().optional()
 });
 
@@ -73,19 +76,31 @@ export async function generateOvertimeTemplateFile(request: Request, response: R
     const parsedBody = templateBodySchema.safeParse(request.body);
     if (!parsedBody.success) {
       response.status(400).json({
-        message: 'Invalid body.date. Use format YYYY-MM, for example 2026-06.'
+        message: 'Invalid body. Required: date (YYYY-MM), username. Optional: text_ot.'
       });
       return;
     }
 
+    const username = parsedBody.data.username.trim();
     const textOt = parsedBody.data.text_ot?.trim() ?? '';
 
-    if (!timesheetFile || !textOt) {
+    if (!timesheetFile) {
       response.status(400).json({
-        message: 'Missing input. Send timesheet (.csv/.xlsx) and body.text_ot.'
+        message: 'Missing input. Send timesheet (.csv/.xlsx) and body.username. body.text_ot is optional.'
       });
       return;
     }
+
+    const userProfile = await findUserByUsername(username);
+    if (!userProfile) {
+      response.status(404).json({
+        message: `User not found for username: ${username}`
+      });
+      return;
+    }
+
+    const holidays = await listEnabledHolidaysByMonth(parsedBody.data.date);
+    const holidayDates = holidays.map((holiday) => holiday.date);
 
     const data = await readUploadedOvertimeFiles(timesheetFile, textOt);
     
@@ -107,7 +122,14 @@ export async function generateOvertimeTemplateFile(request: Request, response: R
     const output = await buildOvertimeTemplateXlsx(
       parsedBody.data.date,
       data.timesheet.rows,
-      data.textOt.tableRows
+      data.textOt.tableRows,
+      {
+        username: userProfile.username,
+        name: userProfile.name,
+        company: userProfile.company,
+        team: userProfile.team
+      },
+      holidayDates
     );
 
     const nodeEnv = (process.env.NODE_ENV ?? '').toLowerCase();

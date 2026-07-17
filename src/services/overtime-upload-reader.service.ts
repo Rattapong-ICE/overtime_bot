@@ -191,14 +191,14 @@ function parseTextOtRows(textOt: string): TextOtRow[] {
 
 export async function readUploadedOvertimeFiles(
   timesheetFile: Express.Multer.File,
-  textOt: string
+  textOt?: string
 ): Promise<UploadedData> {
   const timesheetType = getTimesheetFileType(timesheetFile.originalname);
   const timesheetRows = timesheetType === 'csv'
     ? parseCsvTimesheet(timesheetFile.buffer)
     : await parseXlsxTimesheet(timesheetFile.buffer);
 
-  const normalizedTextOt = textOt.trim();
+  const normalizedTextOt = textOt?.trim() ?? '';
   const textOtRows = parseTextOtRows(normalizedTextOt);
 
   return {

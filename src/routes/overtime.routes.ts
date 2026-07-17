@@ -14,7 +14,7 @@ const upload = multer({
   }
 });
 const OVERTIME_API_ENDPOINTS = [
-  'POST /api/overtime/template/xlsx (multipart: timesheet, body: text_ot)',
+  'POST /api/overtime/template/xlsx (multipart: timesheet, body: username, text_ot optional)',
   'GET /api/employees/:employeeId/overtimes',
   'GET /api/employees/:employeeId/overtimes/summary'
 ];

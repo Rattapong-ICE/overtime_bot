@@ -137,7 +137,7 @@
     <div class="container">
       <div class="card">
         <h1>Generate Overtime Report Synergy</h1>
-        <p>Send timesheet + date + text_ot to POST /api/overtime/template/xlsx.</p>
+        <p>Send timesheet + date + username to POST /api/overtime/template/xlsx. text_ot is optional.</p>
 
         <form id="uploadForm">
           <div>
@@ -157,16 +157,20 @@
           </div>
 
           <div>
+            <label for="username">username</label>
+            <input id="username" name="username" type="text" required />
+          </div>
+
+          <div>
             <label for="timesheet">timesheet (.csv or .xlsx)</label>
             <input id="timesheet" name="timesheet" type="file" accept=".csv,.xlsx" required />
           </div>
 
           <div>
-            <label for="textOt">text_ot (required)</label>
+            <label for="textOt">text_ot (optional)</label>
             <textarea
               id="textOt"
               name="text_ot"
-              required
             ></textarea>
           </div>
 
@@ -195,20 +199,24 @@
 
         const apiUrl = document.getElementById("apiUrl").value.trim();
         const dateValue = document.getElementById("date").value;
+        const usernameValue = document.getElementById("username").value.trim();
         const timesheetInput = document.getElementById("timesheet");
         const textOtValue = document.getElementById("textOt").value.trim();
 
         const timesheetFile = timesheetInput.files[0];
 
-        if (!timesheetFile || !dateValue || !textOtValue) {
-          setStatus("Please provide date, timesheet, and text_ot.", true);
+        if (!timesheetFile || !dateValue || !usernameValue) {
+          setStatus("Please provide date, username, and timesheet.", true);
           return;
         }
 
         const formData = new FormData();
         formData.append("date", dateValue);
+        formData.append("username", usernameValue);
         formData.append("timesheet", timesheetFile);
-        formData.append("text_ot", textOtValue);
+        if (textOtValue) {
+          formData.append("text_ot", textOtValue);
+        }
 
         submitBtn.disabled = true;
         setStatus("Sending request...");
