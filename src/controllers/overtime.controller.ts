@@ -1,4 +1,5 @@
 import { type Request, type Response } from 'express';
+import { unlink } from 'node:fs/promises';
 import { z } from 'zod';
 import {
   listOvertimeEntriesByEmployee,
@@ -14,7 +15,8 @@ const employeeParamsSchema = z.object({
 });
 
 const templateBodySchema = z.object({
-  date: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/)
+  date: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
+  text_ot: z.string().optional()
 });
 
 function parseEmployeeParams(request: Request): { employeeId: string } {
@@ -70,13 +72,6 @@ export async function generateOvertimeTemplateFile(request: Request, response: R
     const timesheetFile = files?.timesheet?.[0];
     const sheetOtPdfFile = files?.sheet_ot_pdf?.[0];
 
-    if (!timesheetFile || !sheetOtPdfFile) {
-      response.status(400).json({
-        message: 'Missing files. Send timesheet (.csv/.xlsx) and sheet_ot_pdf in multipart/form-data.'
-      });
-      return;
-    }
-
     const parsedBody = templateBodySchema.safeParse(request.body);
     if (!parsedBody.success) {
       response.status(400).json({
@@ -85,7 +80,25 @@ export async function generateOvertimeTemplateFile(request: Request, response: R
       return;
     }
 
-    const data = await readUploadedOvertimeFiles(timesheetFile, sheetOtPdfFile);
+    const textOt = parsedBody.data.text_ot?.trim() ?? '';
+
+    if (!timesheetFile || (!sheetOtPdfFile && !textOt)) {
+      response.status(400).json({
+        message: 'Missing input. Send timesheet (.csv/.xlsx) and either sheet_ot_pdf file or body.text_ot.'
+      });
+      return;
+    }
+
+    const data = await readUploadedOvertimeFiles(timesheetFile, sheetOtPdfFile, textOt);
+    
+    logger.info(
+      {
+        pdfFileName: data.sheetOtPdf.fileName,
+        pdfRowCount: data.sheetOtPdf.tableRows.length,
+        pdfRows: data.sheetOtPdf.tableRows
+      },
+      'Sheet OT PDF parsed rows'
+    );
     logger.info(
       {
         timesheetFileName: data.timesheet.fileName,
@@ -120,15 +133,29 @@ export async function generateOvertimeTemplateFile(request: Request, response: R
       data.sheetOtPdf.tableRows
     );
 
-    const firebaseUpload = await uploadGeneratedFileToFirebase(
-      output.filePath,
-      `overtime/${output.fileName}`
-    );
+    const nodeEnv = (process.env.NODE_ENV ?? '').toLowerCase();
+    const isProd = nodeEnv === 'prod' || nodeEnv === 'production';
+
+    if (isProd) {
+      const firebaseUpload = await uploadGeneratedFileToFirebase(
+        output.filePath,
+        `overtime/${output.fileName}`
+      );
+
+      await unlink(output.filePath).catch(() => undefined);
+
+      response.status(201).json({
+        message: 'Overtime template generated successfully',
+        generated: 'firebase',
+        firebaseUpload
+      });
+      return;
+    }
 
     response.status(201).json({
       message: 'Overtime template generated successfully',
-      //output,
-      firebaseUpload
+      generated: 'local',
+      output
     });
   } catch (error) {
     logger.error({ error }, 'Failed to generate overtime template');

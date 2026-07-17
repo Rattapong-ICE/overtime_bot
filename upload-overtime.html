@@ -63,6 +63,7 @@
 
       input[type="url"],
       input[type="month"],
+      textarea,
       input[type="file"],
       button {
         width: 100%;
@@ -70,12 +71,20 @@
 
       input[type="url"],
       input[type="month"],
+      textarea,
       input[type="file"] {
         border: 1px solid var(--border);
         border-radius: 10px;
         padding: 10px 12px;
         font-size: 0.95rem;
         background: #fff;
+      }
+
+      textarea {
+        min-height: 220px;
+        resize: vertical;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        line-height: 1.4;
       }
 
       button {
@@ -128,7 +137,7 @@
     <div class="container">
       <div class="card">
         <h1>Generate Overtime Report Synergy</h1>
-        <p>Send timesheet, sheet_ot_pdf, and date to POST /api/overtime/template/xlsx.</p>
+        <p>Send timesheet + date, then provide either sheet_ot_pdf or text_ot to POST /api/overtime/template/xlsx.</p>
 
         <form id="uploadForm">
           <div>
@@ -154,7 +163,15 @@
 
           <div>
             <label for="sheetOtPdf">sheet_ot_pdf (.pdf)</label>
-            <input id="sheetOtPdf" name="sheet_ot_pdf" type="file" accept=".pdf" required />
+            <input id="sheetOtPdf" name="sheet_ot_pdf" type="file" accept=".pdf" />
+          </div>
+
+          <div>
+            <label for="textOt">text_ot (optional, use instead of PDF)</label>
+            <textarea
+              id="textOt"
+              name="text_ot"
+            ></textarea>
           </div>
 
           <button id="submitBtn" type="submit">Send Request</button>
@@ -184,19 +201,25 @@
         const dateValue = document.getElementById("date").value;
         const timesheetInput = document.getElementById("timesheet");
         const sheetOtPdfInput = document.getElementById("sheetOtPdf");
+        const textOtValue = document.getElementById("textOt").value.trim();
 
         const timesheetFile = timesheetInput.files[0];
         const pdfFile = sheetOtPdfInput.files[0];
 
-        if (!timesheetFile || !pdfFile || !dateValue) {
-          setStatus("Please provide date, timesheet, and sheet_ot_pdf.", true);
+        if (!timesheetFile || !dateValue || (!pdfFile && !textOtValue)) {
+          setStatus("Please provide date, timesheet, and either sheet_ot_pdf or text_ot.", true);
           return;
         }
 
         const formData = new FormData();
         formData.append("date", dateValue);
         formData.append("timesheet", timesheetFile);
-        formData.append("sheet_ot_pdf", pdfFile);
+        if (pdfFile) {
+          formData.append("sheet_ot_pdf", pdfFile);
+        }
+        if (textOtValue) {
+          formData.append("text_ot", textOtValue);
+        }
 
         submitBtn.disabled = true;
         setStatus("Sending request...");
