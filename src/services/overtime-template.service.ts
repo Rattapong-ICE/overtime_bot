@@ -700,9 +700,12 @@ export async function generateOvertimeTemplateXlsx(
 
   worksheet.getCell('K6').alignment = { vertical: 'middle', horizontal: 'left' };
 
-  const outputDirectory = path.join(process.cwd(), 'output');
-  await mkdir(outputDirectory, { recursive: true });
-  //const outputDirectory = path.join(os.tmpdir(), 'overtime_bot_output');
+  // Always write generated files to OS temp directory to avoid read-only filesystem issues on prod/serverless.
+  const outputDirectory = path.join(os.tmpdir(), 'overtime_bot_output');
+
+  // For local debugging in `npm run dev`, uncomment this block and comment the line above.
+  // const outputDirectory = path.join(process.cwd(), 'output');
+
   await mkdir(outputDirectory, { recursive: true });
 
   const fileName = `overtime-template-${monthLabel}.xlsx`;
