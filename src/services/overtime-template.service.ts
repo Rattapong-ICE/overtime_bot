@@ -1,4 +1,5 @@
 import { mkdir } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import ExcelJS from 'exceljs';
 
@@ -699,7 +700,9 @@ export async function generateOvertimeTemplateXlsx(
 
   worksheet.getCell('K6').alignment = { vertical: 'middle', horizontal: 'left' };
 
-  const outputDirectory = path.join(process.cwd(), 'output');
+  // const outputDirectory = path.join(process.cwd(), 'output');
+  // await mkdir(outputDirectory, { recursive: true });
+  const outputDirectory = path.join(os.tmpdir(), 'overtime_bot_output');
   await mkdir(outputDirectory, { recursive: true });
 
   const fileName = `overtime-template-${monthLabel}.xlsx`;

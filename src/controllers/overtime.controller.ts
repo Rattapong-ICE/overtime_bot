@@ -127,13 +127,15 @@ export async function generateOvertimeTemplateFile(request: Request, response: R
 
     response.status(201).json({
       message: 'Overtime template generated successfully',
-      output,
+      //output,
       firebaseUpload
     });
   } catch (error) {
     logger.error({ error }, 'Failed to generate overtime template');
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     response.status(400).json({
-      message: 'Failed to generate overtime template.'
+      message: 'Failed to generate overtime template.',
+      ...(process.env.NODE_ENV !== 'production' ? { reason: errorMessage } : {})
     });
   }
 }
