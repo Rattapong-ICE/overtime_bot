@@ -66,11 +66,9 @@ export async function generateOvertimeTemplateFile(request: Request, response: R
   try {
     const files = request.files as {
       timesheet?: Express.Multer.File[];
-      sheet_ot_pdf?: Express.Multer.File[];
     } | undefined;
 
     const timesheetFile = files?.timesheet?.[0];
-    const sheetOtPdfFile = files?.sheet_ot_pdf?.[0];
 
     const parsedBody = templateBodySchema.safeParse(request.body);
     if (!parsedBody.success) {
@@ -82,22 +80,22 @@ export async function generateOvertimeTemplateFile(request: Request, response: R
 
     const textOt = parsedBody.data.text_ot?.trim() ?? '';
 
-    if (!timesheetFile || (!sheetOtPdfFile && !textOt)) {
+    if (!timesheetFile || !textOt) {
       response.status(400).json({
-        message: 'Missing input. Send timesheet (.csv/.xlsx) and either sheet_ot_pdf file or body.text_ot.'
+        message: 'Missing input. Send timesheet (.csv/.xlsx) and body.text_ot.'
       });
       return;
     }
 
-    const data = await readUploadedOvertimeFiles(timesheetFile, sheetOtPdfFile, textOt);
+    const data = await readUploadedOvertimeFiles(timesheetFile, textOt);
     
     logger.info(
       {
-        pdfFileName: data.sheetOtPdf.fileName,
-        pdfRowCount: data.sheetOtPdf.tableRows.length,
-        pdfRows: data.sheetOtPdf.tableRows
+        textOtSource: data.textOt.fileName,
+        textOtRowCount: data.textOt.tableRows.length,
+        textOtRows: data.textOt.tableRows
       },
-      'Sheet OT PDF parsed rows'
+      'text_ot parsed rows'
     );
     logger.info(
       {
@@ -106,31 +104,10 @@ export async function generateOvertimeTemplateFile(request: Request, response: R
       },
       'Timesheet data loaded for template generation'
     );
-    
-    // logger.info(
-    //   {
-    //     pdfFileName: data.sheetOtPdf.fileName,
-    //     pdfRowCount: data.sheetOtPdf.tableRows.length,
-    //     pdfRows: data.sheetOtPdf.tableRows
-    //   },
-    //   'Parsed sheet_ot_pdf table rows'
-    // );
-    // logger.info(
-    //   {
-    //     timesheetSample: data.timesheet.rows[0] ?? null,
-    //     timesheetCount: data.timesheet.rows.length,
-    //     timesheetJson: data.timesheet.rows,
-    //     timesheetFileName: data.timesheet.fileName,
-    //     timesheetFileType: data.timesheet.fileType
-    //   },
-    //   'Timesheet parsed to JSON successfully'
-    // );
-    // logger.info({ sheetOtPdfText: data.sheetOtPdf.text }, 'sheet_ot_pdf text extracted successfully');
-
     const output = await buildOvertimeTemplateXlsx(
       parsedBody.data.date,
       data.timesheet.rows,
-      data.sheetOtPdf.tableRows
+      data.textOt.tableRows
     );
 
     const nodeEnv = (process.env.NODE_ENV ?? '').toLowerCase();

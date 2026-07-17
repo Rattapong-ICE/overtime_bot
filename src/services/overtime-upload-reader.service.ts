@@ -1,11 +1,10 @@
 import path from 'node:path';
 import ExcelJS from 'exceljs';
-import PDFParse from 'pdf-parse';
 import { parse as parseCsv } from 'csv-parse/sync';
 
 type TimesheetJsonRow = Record<string, string>;
 
-type PdfTableRow = {
+type TextOtRow = {
   day: string;
   from: string;
   to: string;
@@ -21,10 +20,10 @@ type UploadedData = {
     fileType: 'csv' | 'xlsx';
     rows: TimesheetJsonRow[];
   };
-  sheetOtPdf: {
+  textOt: {
     fileName: string;
     text: string;
-    tableRows: PdfTableRow[];
+    tableRows: TextOtRow[];
   };
 };
 
@@ -132,128 +131,13 @@ async function parseXlsxTimesheet(buffer: Buffer): Promise<TimesheetJsonRow[]> {
   return mapRowsToJson(headers, dataRows);
 }
 
-async function parsePdfText(buffer: Buffer): Promise<string> {
-  const pdfParseAny = PDFParse as unknown as {
-    (data: Buffer | Uint8Array): Promise<{ text: string }>;
-    prototype?: {
-      getText?: unknown;
-      destroy?: unknown;
-    };
-    new (options: { data: Uint8Array }): {
-      getText: () => Promise<{ text: string }>;
-      destroy: () => Promise<void>;
-    };
-  };
-
-  // Keep old behavior for versions that expose a class API.
-  if (typeof pdfParseAny === 'function' && typeof pdfParseAny.prototype?.getText === 'function') {
-    const parser = new pdfParseAny({ data: new Uint8Array(buffer) });
-
-    try {
-      const textResult = await parser.getText();
-      return textResult.text.trim();
-    } finally {
-      await parser.destroy();
-    }
-  }
-
-  // Fallback for versions that export a plain function.
-  if (typeof pdfParseAny === 'function') {
-    const textResult = await pdfParseAny(buffer);
-    return textResult.text.trim();
-  }
-
-  throw new Error('Unsupported pdf-parse module format.');
-}
-
-function parsePdfTableRows(pdfText: string): PdfTableRow[] {
-  const lines = pdfText
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line !== '');
-
-  const rows: PdfTableRow[] = [];
-  let currentRow: PdfTableRow | null = null;
-  const rowWithTimePattern = /^(?<day>\d{1,2})\s+(?<from>\d{1,2}:\d{2})\s+(?<to>\d{1,2}:\d{2})\s+(?<hours>\d{1,2}:\d{2})(?:\s+(?<description>.*))?$/;
-  const dayOnlyPattern = /^(?<day>\d{1,2})$/;
-  const stopLinePattern = /(ลงชื่อ|signature|พนักงาน|employee|หัวหน้างาน|supervisor|client authorized approval|classification|employee over time document|as of month|client project name|department|date\s*\/\s*time|description|remark|หมายเหตุ)/i;
-
-  for (const line of lines) {
-    const rowWithTimeMatch = line.match(rowWithTimePattern);
-    if (rowWithTimeMatch && rowWithTimeMatch.groups) {
-      const dayNumber = Number(rowWithTimeMatch.groups.day);
-      if (!Number.isInteger(dayNumber) || dayNumber < 1 || dayNumber > 31) {
-        continue;
-      }
-
-      currentRow = {
-        day: rowWithTimeMatch.groups.day,
-        from: (rowWithTimeMatch.groups.from ?? '').trim(),
-        to: (rowWithTimeMatch.groups.to ?? '').trim(),
-        hours: (rowWithTimeMatch.groups.hours ?? '').trim(),
-        description: (rowWithTimeMatch.groups.description ?? '').trim(),
-        remark: '',
-        rawLine: `${rowWithTimeMatch.groups.day} ${rowWithTimeMatch.groups.from} ${rowWithTimeMatch.groups.to} ${rowWithTimeMatch.groups.hours}`
-      };
-
-      rows.push(currentRow);
-      continue;
-    }
-
-    const dayOnlyMatch = line.match(dayOnlyPattern);
-    if (dayOnlyMatch && dayOnlyMatch.groups) {
-      const dayNumber = Number(dayOnlyMatch.groups.day);
-      if (!Number.isInteger(dayNumber) || dayNumber < 1 || dayNumber > 31) {
-        continue;
-      }
-
-      currentRow = {
-        day: dayOnlyMatch.groups.day,
-        from: '',
-        to: '',
-        hours: '',
-        description: '',
-        remark: '',
-        rawLine: dayOnlyMatch.groups.day
-      };
-
-      rows.push(currentRow);
-      continue;
-    }
-
-    if (!currentRow) {
-      continue;
-    }
-
-    if (stopLinePattern.test(line)) {
-      currentRow = null;
-      continue;
-    }
-
-    if (!currentRow.from || !currentRow.to || !currentRow.hours) {
-      continue;
-    }
-
-    const continuation = line.trim();
-    if (continuation === '') {
-      continue;
-    }
-
-    currentRow.description = currentRow.description
-      ? `${currentRow.description} ${continuation}`
-      : continuation;
-  }
-
-  return rows;
-}
-
-function parseTextOtRows(textOt: string): PdfTableRow[] {
+function parseTextOtRows(textOt: string): TextOtRow[] {
   const lines = textOt
     .split(/\r?\n/)
     .map((line) => line.replace(/\r/g, '').trimEnd());
 
-  const rows: PdfTableRow[] = [];
-  let currentRow: PdfTableRow | null = null;
+  const rows: TextOtRow[] = [];
+  let currentRow: TextOtRow | null = null;
 
   for (const rawLine of lines) {
     const line = rawLine.trim();
@@ -307,29 +191,15 @@ function parseTextOtRows(textOt: string): PdfTableRow[] {
 
 export async function readUploadedOvertimeFiles(
   timesheetFile: Express.Multer.File,
-  sheetOtPdfFile?: Express.Multer.File,
-  textOt?: string
+  textOt: string
 ): Promise<UploadedData> {
   const timesheetType = getTimesheetFileType(timesheetFile.originalname);
   const timesheetRows = timesheetType === 'csv'
     ? parseCsvTimesheet(timesheetFile.buffer)
     : await parseXlsxTimesheet(timesheetFile.buffer);
 
-  const normalizedTextOt = textOt?.trim() ?? '';
-  let sourceText = '';
-  let sourceFileName = sheetOtPdfFile?.originalname ?? 'text_ot';
-  let pdfTableRows: PdfTableRow[] = [];
-
-  if (normalizedTextOt) {
-    sourceText = normalizedTextOt;
-    pdfTableRows = parseTextOtRows(normalizedTextOt);
-  }
-
-  if (pdfTableRows.length === 0 && sheetOtPdfFile) {
-    sourceText = await parsePdfText(sheetOtPdfFile.buffer);
-    sourceFileName = sheetOtPdfFile.originalname;
-    pdfTableRows = parsePdfTableRows(sourceText);
-  }
+  const normalizedTextOt = textOt.trim();
+  const textOtRows = parseTextOtRows(normalizedTextOt);
 
   return {
     timesheet: {
@@ -337,10 +207,10 @@ export async function readUploadedOvertimeFiles(
       fileType: timesheetType,
       rows: timesheetRows
     },
-    sheetOtPdf: {
-      fileName: sourceFileName,
-      text: sourceText,
-      tableRows: pdfTableRows
+    textOt: {
+      fileName: 'text_ot',
+      text: normalizedTextOt,
+      tableRows: textOtRows
     }
   };
 }

@@ -14,17 +14,14 @@ const upload = multer({
   }
 });
 const OVERTIME_API_ENDPOINTS = [
-  'POST /api/overtime/template/xlsx (multipart: timesheet, sheet_ot_pdf)',
+  'POST /api/overtime/template/xlsx (multipart: timesheet, body: text_ot)',
   'GET /api/employees/:employeeId/overtimes',
   'GET /api/employees/:employeeId/overtimes/summary'
 ];
 
 overtimeRouter.post(
   '/overtime/template/xlsx',
-  upload.fields([
-    { name: 'timesheet', maxCount: 1 },
-    { name: 'sheet_ot_pdf', maxCount: 1 }
-  ]),
+  upload.fields([{ name: 'timesheet', maxCount: 1 }]),
   generateOvertimeTemplateFile
 );
 overtimeRouter.get('/employees/:employeeId/overtimes', getOvertimeEntriesByEmployee);
