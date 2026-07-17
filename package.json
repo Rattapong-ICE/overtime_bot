@@ -23,15 +23,21 @@
   },
   "homepage": "https://github.com/Rattapong-ICE/overtime_bot#readme",
   "dependencies": {
+    "csv-parse": "^7.0.1",
     "dotenv": "^17.4.2",
+    "exceljs": "^4.4.0",
     "express": "^5.2.1",
+    "firebase-admin": "^14.2.0",
     "mongoose": "^9.7.4",
+    "multer": "^2.2.0",
+    "pdf-parse": "^2.4.5",
     "pino": "^10.3.1",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/express": "^5.0.6",
+    "@types/multer": "^2.2.0",
     "@types/node": "^26.1.1",
     "eslint": "^10.7.0",
     "eslint-config-prettier": "^10.1.8",

@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Overtime Upload</title>
+    <style>
+      :root {
+        --bg: #f5f7fb;
+        --card: #ffffff;
+        --text: #1f2937;
+        --muted: #6b7280;
+        --primary: #1d4ed8;
+        --border: #dbe3ef;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        color: var(--text);
+        background: radial-gradient(circle at top right, #dbeafe 0%, var(--bg) 45%);
+      }
+
+      .container {
+        max-width: 760px;
+        margin: 40px auto;
+        padding: 0 16px;
+      }
+
+      .card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 20px;
+        box-shadow: 0 12px 24px rgba(15, 23, 42, 0.06);
+      }
+
+      h1 {
+        margin: 0 0 8px;
+        font-size: 1.4rem;
+      }
+
+      p {
+        margin: 0 0 20px;
+        color: var(--muted);
+      }
+
+      form {
+        display: grid;
+        gap: 14px;
+      }
+
+      label {
+        display: block;
+        font-size: 0.92rem;
+        font-weight: 600;
+        margin-bottom: 6px;
+      }
+
+      input[type="url"],
+      input[type="month"],
+      input[type="file"],
+      button {
+        width: 100%;
+      }
+
+      input[type="url"],
+      input[type="month"],
+      input[type="file"] {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 10px 12px;
+        font-size: 0.95rem;
+        background: #fff;
+      }
+
+      button {
+        border: none;
+        border-radius: 10px;
+        padding: 12px;
+        background: linear-gradient(135deg, #2563eb, var(--primary));
+        color: #fff;
+        font-size: 0.96rem;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      button:disabled {
+        opacity: 0.65;
+        cursor: not-allowed;
+      }
+
+      .hint {
+        font-size: 0.84rem;
+        color: var(--muted);
+      }
+
+      pre {
+        margin: 20px 0 0;
+        background: #0b1220;
+        color: #cde2ff;
+        border-radius: 10px;
+        padding: 14px;
+        min-height: 120px;
+        overflow: auto;
+        font-size: 0.86rem;
+      }
+
+      .status {
+        margin-top: 12px;
+        font-size: 0.9rem;
+      }
+
+      .ok {
+        color: #15803d;
+      }
+
+      .error {
+        color: #b91c1c;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="card">
+        <h1>Generate Overtime Report Synergy</h1>
+        <p>Send timesheet, sheet_ot_pdf, and date to POST /api/overtime/template/xlsx.</p>
+
+        <form id="uploadForm">
+          <div>
+            <label for="apiUrl">API URL</label>
+            <input
+              id="apiUrl"
+              name="apiUrl"
+              type="url"
+              value="http://localhost:3000/api/overtime/template/xlsx"
+              required
+            />
+          </div>
+
+          <div>
+            <label for="date">date (YYYY-MM)</label>
+            <input id="date" name="date" type="month" required />
+          </div>
+
+          <div>
+            <label for="timesheet">timesheet (.csv or .xlsx)</label>
+            <input id="timesheet" name="timesheet" type="file" accept=".csv,.xlsx" required />
+          </div>
+
+          <div>
+            <label for="sheetOtPdf">sheet_ot_pdf (.pdf)</label>
+            <input id="sheetOtPdf" name="sheet_ot_pdf" type="file" accept=".pdf" required />
+          </div>
+
+          <button id="submitBtn" type="submit">Send Request</button>
+          <div class="hint">If API is on another host, ensure CORS allows this page origin.</div>
+        </form>
+
+        <div id="status" class="status"></div>
+        <pre id="result">Response will appear here...</pre>
+      </div>
+    </div>
+
+    <script>
+      const form = document.getElementById("uploadForm");
+      const submitBtn = document.getElementById("submitBtn");
+      const resultBox = document.getElementById("result");
+      const statusBox = document.getElementById("status");
+
+      function setStatus(text, isError = false) {
+        statusBox.textContent = text;
+        statusBox.className = `status ${isError ? "error" : "ok"}`;
+      }
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+
+        const apiUrl = document.getElementById("apiUrl").value.trim();
+        const dateValue = document.getElementById("date").value;
+        const timesheetInput = document.getElementById("timesheet");
+        const sheetOtPdfInput = document.getElementById("sheetOtPdf");
+
+        const timesheetFile = timesheetInput.files[0];
+        const pdfFile = sheetOtPdfInput.files[0];
+
+        if (!timesheetFile || !pdfFile || !dateValue) {
+          setStatus("Please provide date, timesheet, and sheet_ot_pdf.", true);
+          return;
+        }
+
+        const formData = new FormData();
+        formData.append("date", dateValue);
+        formData.append("timesheet", timesheetFile);
+        formData.append("sheet_ot_pdf", pdfFile);
+
+        submitBtn.disabled = true;
+        setStatus("Sending request...");
+        resultBox.textContent = "Waiting for response...";
+
+        try {
+          const response = await fetch(apiUrl, {
+            method: "POST",
+            body: formData
+          });
+
+          const text = await response.text();
+          let payload;
+          try {
+            payload = JSON.parse(text);
+          } catch {
+            payload = { raw: text };
+          }
+
+          resultBox.textContent = JSON.stringify(payload, null, 2);
+          if (response.ok) {
+            setStatus(`Success (${response.status})`);
+          } else {
+            setStatus(`Request failed (${response.status})`, true);
+          }
+        } catch (error) {
+          resultBox.textContent = JSON.stringify({
+            error: error instanceof Error ? error.message : String(error)
+          }, null, 2);
+          setStatus("Network error while sending request.", true);
+        } finally {
+          submitBtn.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>
