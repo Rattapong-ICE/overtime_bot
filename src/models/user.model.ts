@@ -23,6 +23,12 @@ const userSchema = new Schema(
       type: String,
       required: true,
       trim: true
+    },
+    attemp: {
+      type: Number,
+      required: true,
+      default: 3,
+      min: 0
     }
   },
   {

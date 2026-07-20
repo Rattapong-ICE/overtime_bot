@@ -8,7 +8,7 @@ import {
 import { generateOvertimeTemplateXlsx as buildOvertimeTemplateXlsx } from '../services/overtime-template.service';
 import { uploadGeneratedFileToFirebase } from '../services/firebase-storage.service';
 import { readUploadedOvertimeFiles } from '../services/overtime-upload-reader.service';
-import { findUserByUsername } from '../services/user.service';
+import { consumeUserGenFileAttempt } from '../services/user.service';
 import { listEnabledHolidaysByMonth } from '../services/holiday.service';
 import { logger } from '../lib/logger';
 
@@ -91,7 +91,22 @@ export async function generateOvertimeTemplateFile(request: Request, response: R
       return;
     }
 
-    const userProfile = await findUserByUsername(username);
+    const consumeAttemptResult = await consumeUserGenFileAttempt(username);
+    if (!consumeAttemptResult.ok) {
+      if (consumeAttemptResult.reason === 'USER_NOT_FOUND') {
+        response.status(404).json({
+          message: `User not found for username: ${username}`
+        });
+        return;
+      }
+
+      response.status(403).json({
+        message: 'คุณใช้โควต้าหมดแล้ว กรุณาแจ้งแอดมิน'
+      });
+      return;
+    }
+
+    const userProfile = consumeAttemptResult.user;
     if (!userProfile) {
       response.status(404).json({
         message: `User not found for username: ${username}`
@@ -146,7 +161,8 @@ export async function generateOvertimeTemplateFile(request: Request, response: R
       response.status(201).json({
         message: 'Overtime template generated successfully',
         generated: 'firebase',
-        firebaseUpload
+        firebaseUpload,
+        remainingAttemp: userProfile.attemp
       });
       return;
     }
@@ -154,7 +170,8 @@ export async function generateOvertimeTemplateFile(request: Request, response: R
     response.status(201).json({
       message: 'Overtime template generated successfully',
       generated: 'local',
-      output
+      output,
+      remainingAttemp: userProfile.attemp
     });
   } catch (error) {
     logger.error({ error }, 'Failed to generate overtime template');
