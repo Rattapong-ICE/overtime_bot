@@ -1,4 +1,5 @@
 import path from 'node:path';
+import os from 'node:os';
 import { mkdir } from 'node:fs/promises';
 import ExcelJS from 'exceljs';
 import { parse as parseCsv } from 'csv-parse/sync';
@@ -494,7 +495,7 @@ export async function generateNaccOvertimeExcel(month: string, rows: NaccParsedR
     }
   }
 
-  const outputDir = path.join(process.cwd(), 'output', 'nacc-overtime');
+  const outputDir = path.join(os.tmpdir(), 'nacc-overtime');
   await mkdir(outputDir, { recursive: true });
 
   const fileName = `nacc-overtime-${month}.xlsx`;
