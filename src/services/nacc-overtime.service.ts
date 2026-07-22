@@ -46,6 +46,13 @@ const NACC_OT_CAP_HOUR = 20;
 const NACC_OT_CAP_MINUTE = 0;
 const NACC_OT_RATE_PER_HOUR = 50;
 const NACC_OT_CAP_AMOUNT = 200;
+const WEEKEND_ROW_FILL = 'FFF2F2F2';
+const NACC_WEEKEND_OT_START_HOUR = 8;
+const NACC_WEEKEND_OT_START_MINUTE = 30;
+const NACC_WEEKEND_OT_END_HOUR = 16;
+const NACC_WEEKEND_OT_END_MINUTE = 30;
+const NACC_WEEKEND_LUNCH_BREAK_MINUTES = 60;
+const NACC_WEEKEND_FULL_DAY_AMOUNT = 400;
 
 function normalizeCell(value: string | undefined): string {
   return (value ?? '').replace(/^\uFEFF/, '').trim();
@@ -304,6 +311,20 @@ function toUtcTimestamp(value: string): number | null {
   return Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
 }
 
+function isWeekendDate(year: number, month: number, day: number): boolean {
+  const dayOfWeek = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+  return dayOfWeek === 0 || dayOfWeek === 6;
+}
+
+function isWeekendDateTime(value: string): boolean {
+  const parts = parseDateTimeParts(value);
+  if (!parts) {
+    return false;
+  }
+
+  return isWeekendDate(parts.year, parts.month, parts.day);
+}
+
 function buildDailyMinMaxRows(month: string, rows: NaccParsedRow[]): DailyMinMax[] {
   const monthPrefix = `${month}-`;
   const grouped = new Map<string, DailyMinMax>();
@@ -340,32 +361,86 @@ function buildDailyMinMaxRows(month: string, rows: NaccParsedRow[]): DailyMinMax
   return Array.from(grouped.values());
 }
 
-function calculateOtSummary(checkOutDateTime: string): { otHours: number; amount: number } {
-  const parsed = parseDateTimeParts(checkOutDateTime);
-  if (!parsed) {
+function calculateOtSummary(checkInDateTime: string, checkOutDateTime: string): { otHours: number; amount: number } {
+  const checkInParts = parseDateTimeParts(checkInDateTime);
+  const checkOutParts = parseDateTimeParts(checkOutDateTime);
+  if (!checkInParts || !checkOutParts) {
     return { otHours: 0, amount: 0 };
   }
 
+  const checkInTs = toUtcTimestamp(checkInDateTime);
+  const checkOutTs = toUtcTimestamp(checkOutDateTime);
+  if (checkInTs === null || checkOutTs === null || checkOutTs <= checkInTs) {
+    return { otHours: 0, amount: 0 };
+  }
+
+  if (isWeekendDate(checkOutParts.year, checkOutParts.month, checkOutParts.day)) {
+    const weekendWindowStartTs = Date.UTC(
+      checkOutParts.year,
+      checkOutParts.month - 1,
+      checkOutParts.day,
+      NACC_WEEKEND_OT_START_HOUR,
+      NACC_WEEKEND_OT_START_MINUTE,
+      0
+    );
+    const weekendWindowEndTs = Date.UTC(
+      checkOutParts.year,
+      checkOutParts.month - 1,
+      checkOutParts.day,
+      NACC_WEEKEND_OT_END_HOUR,
+      NACC_WEEKEND_OT_END_MINUTE,
+      0
+    );
+
+    const effectiveStartTs = Math.max(checkInTs, weekendWindowStartTs);
+    const effectiveEndTs = Math.min(checkOutTs, weekendWindowEndTs);
+
+    if (effectiveEndTs <= effectiveStartTs) {
+      return { otHours: 0, amount: 0 };
+    }
+
+    // Business rule: full weekend shift in allowed window pays fixed 400 THB.
+    if (checkInTs <= weekendWindowStartTs && checkOutTs >= weekendWindowEndTs) {
+      return {
+        otHours: NACC_WEEKEND_FULL_DAY_AMOUNT / NACC_OT_RATE_PER_HOUR,
+        amount: NACC_WEEKEND_FULL_DAY_AMOUNT
+      };
+    }
+
+    const workedMinutesInWindow = Math.floor((effectiveEndTs - effectiveStartTs) / 60_000);
+    const payableMinutes = Math.max(0, workedMinutesInWindow - NACC_WEEKEND_LUNCH_BREAK_MINUTES);
+
+    if (payableMinutes < 60) {
+      return { otHours: 0, amount: 0 };
+    }
+
+    const fullHours = Math.floor(payableMinutes / 60);
+
+    return {
+      otHours: fullHours,
+      amount: fullHours * NACC_OT_RATE_PER_HOUR
+    };
+  }
+
   const otStartTs = Date.UTC(
-    parsed.year,
-    parsed.month - 1,
-    parsed.day,
+    checkOutParts.year,
+    checkOutParts.month - 1,
+    checkOutParts.day,
     NACC_OT_START_HOUR,
     NACC_OT_START_MINUTE,
     0
   );
 
   const otCapTs = Date.UTC(
-    parsed.year,
-    parsed.month - 1,
-    parsed.day,
+    checkOutParts.year,
+    checkOutParts.month - 1,
+    checkOutParts.day,
     NACC_OT_CAP_HOUR,
     NACC_OT_CAP_MINUTE,
     0
   );
 
-  const checkOutTs = toUtcTimestamp(checkOutDateTime);
-  if (checkOutTs === null || checkOutTs <= otStartTs) {
+  if (checkOutTs <= otStartTs) {
     return { otHours: 0, amount: 0 };
   }
 
@@ -404,7 +479,7 @@ async function buildOvertimeReportRows(month: string, rows: NaccParsedRow[]): Pr
 
   const reportRows = dailyRows
     .map((row) => {
-      const otSummary = calculateOtSummary(row.checkOutDateTime);
+      const otSummary = calculateOtSummary(row.checkInDateTime, row.checkOutDateTime);
       if (otSummary.amount <= 0) {
         return null;
       }
@@ -484,6 +559,7 @@ export async function generateNaccOvertimeExcel(month: string, rows: NaccParsedR
       row.otHours,
       row.amount
     ]);
+    const isWeekendRow = isWeekendDateTime(row.checkInDateTime);
 
     for (let columnIndex = 1; columnIndex <= headers.length; columnIndex += 1) {
       const cell = excelRow.getCell(columnIndex);
@@ -492,6 +568,14 @@ export async function generateNaccOvertimeExcel(month: string, rows: NaccParsedR
         vertical: 'middle',
         horizontal: columnIndex === 1 ? 'left' : 'center'
       };
+
+      if (isWeekendRow) {
+        cell.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: WEEKEND_ROW_FILL }
+        };
+      }
     }
   }
 
