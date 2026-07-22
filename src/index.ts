@@ -62,6 +62,14 @@ app.get('/upload', (_request: Request, response: Response) => {
   response.sendFile(path.join(process.cwd(), 'upload-overtime.html'));
 });
 
+app.get('/upload-nacc-overtime.html', (_request: Request, response: Response) => {
+  response.sendFile(path.join(process.cwd(), 'upload-nacc-overtime.html'));
+});
+
+app.get('/upload-nacc', (_request: Request, response: Response) => {
+  response.sendFile(path.join(process.cwd(), 'upload-nacc-overtime.html'));
+});
+
 app.use((_request: Request, response: Response) => {
   response.status(404).json({
     message: 'Not found'

@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NACC Overtime Upload</title>
+    <style>
+      :root {
+        --bg-top: #f7f4ed;
+        --bg-bottom: #eaf3f8;
+        --surface: #ffffff;
+        --text: #1e293b;
+        --muted: #64748b;
+        --accent: #0f766e;
+        --accent-2: #0ea5e9;
+        --danger: #b91c1c;
+        --ok: #15803d;
+        --border: #d7e1ea;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: "Noto Sans Thai", "Sarabun", "Segoe UI", sans-serif;
+        color: var(--text);
+        background:
+          radial-gradient(circle at 10% 20%, rgba(14, 165, 233, 0.18), transparent 42%),
+          radial-gradient(circle at 90% 10%, rgba(15, 118, 110, 0.2), transparent 44%),
+          linear-gradient(180deg, var(--bg-top), var(--bg-bottom));
+      }
+
+      .wrap {
+        max-width: 840px;
+        margin: 36px auto;
+        padding: 0 16px;
+      }
+
+      .panel {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        padding: 22px;
+        box-shadow: 0 14px 34px rgba(15, 23, 42, 0.08);
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 1.4rem;
+      }
+
+      .subtitle {
+        margin: 8px 0 18px;
+        color: var(--muted);
+      }
+
+      form {
+        display: grid;
+        gap: 14px;
+      }
+
+      .field label {
+        display: block;
+        margin-bottom: 6px;
+        font-size: 0.92rem;
+        font-weight: 600;
+      }
+
+      input[type="url"],
+      input[type="month"],
+      input[type="file"] {
+        width: 100%;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 10px 12px;
+        font-size: 0.95rem;
+      }
+
+      .meta {
+        font-size: 0.85rem;
+        color: var(--muted);
+      }
+
+      button {
+        border: none;
+        border-radius: 11px;
+        padding: 12px;
+        color: #fff;
+        font-size: 0.96rem;
+        font-weight: 700;
+        cursor: pointer;
+        background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      }
+
+      button:disabled {
+        opacity: 0.7;
+        cursor: not-allowed;
+      }
+
+      #status {
+        margin-top: 12px;
+        min-height: 22px;
+        font-size: 0.92rem;
+      }
+
+      .ok {
+        color: var(--ok);
+      }
+
+      .error {
+        color: var(--danger);
+      }
+
+      pre {
+        margin: 14px 0 0;
+        border-radius: 12px;
+        padding: 14px;
+        background: #071421;
+        color: #d8ecff;
+        min-height: 140px;
+        overflow: auto;
+        font-size: 0.84rem;
+      }
+
+      @media (max-width: 640px) {
+        .panel {
+          padding: 16px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="panel">
+        <h1>NACC Overtime File Reader</h1>
+        <p class="subtitle">เลือกเดือน/ปี แล้วอัปโหลดไฟล์ .dat, .csv หรือ .xlsx เพื่อทดสอบ API ใหม่</p>
+
+        <form id="uploadForm">
+          <div class="field">
+            <label for="apiUrl">API URL</label>
+            <input
+              id="apiUrl"
+              name="apiUrl"
+              type="url"
+              value="https://overtime-bot.vercel.app/api/nacc/overtime/read"
+              required
+            />
+          </div>
+
+          <div class="field">
+            <label for="month">เดือน/ปี (YYYY-MM)</label>
+            <input id="month" name="month" type="month" required />
+          </div>
+
+          <div class="field">
+            <label for="overtimeFile">ไฟล์ (.dat, .csv, .xlsx)</label>
+            <input id="overtimeFile" name="overtimeFile" type="file" accept=".dat,.csv,.xlsx" required />
+            <div class="meta">field name: overtimeFile</div>
+          </div>
+
+          <button id="submitBtn" type="submit">อัปโหลดและอ่านไฟล์</button>
+        </form>
+
+        <div id="status"></div>
+        <pre id="result">ผลลัพธ์จะแสดงตรงนี้...</pre>
+      </div>
+    </div>
+
+    <script>
+      const form = document.getElementById('uploadForm');
+      const submitBtn = document.getElementById('submitBtn');
+      const statusBox = document.getElementById('status');
+      const resultBox = document.getElementById('result');
+
+      function setStatus(message, isError = false) {
+        statusBox.textContent = message;
+        statusBox.className = isError ? 'error' : 'ok';
+      }
+
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+
+        const apiUrl = document.getElementById('apiUrl').value.trim();
+        const month = document.getElementById('month').value;
+        const fileInput = document.getElementById('overtimeFile');
+        const file = fileInput.files[0];
+
+        if (!month || !file) {
+          setStatus('กรุณาเลือกเดือน/ปี และไฟล์ก่อนส่ง', true);
+          return;
+        }
+
+        const formData = new FormData();
+        formData.append('month', month);
+        formData.append('overtimeFile', file);
+
+        submitBtn.disabled = true;
+        setStatus('กำลังส่งคำขอ...');
+        resultBox.textContent = 'กำลังรอผลลัพธ์...';
+
+        try {
+          const response = await fetch(apiUrl, {
+            method: 'POST',
+            body: formData
+          });
+
+          const text = await response.text();
+          let payload;
+          try {
+            payload = JSON.parse(text);
+          } catch {
+            payload = { raw: text };
+          }
+
+          resultBox.textContent = JSON.stringify(payload, null, 2);
+          setStatus(
+            response.ok ? `สำเร็จ (${response.status})` : `ไม่สำเร็จ (${response.status})`,
+            !response.ok
+          );
+        } catch (error) {
+          resultBox.textContent = JSON.stringify(
+            {
+              error: error instanceof Error ? error.message : String(error)
+            },
+            null,
+            2
+          );
+          setStatus('เกิดข้อผิดพลาดเครือข่าย', true);
+        } finally {
+          submitBtn.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>

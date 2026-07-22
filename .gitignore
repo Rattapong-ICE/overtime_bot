@@ -115,6 +115,7 @@ dist
 
 # DynamoDB Local files
 .dynamodb/
+user-nacc.json
 
 # Firebase cache directory
 .firebase/
