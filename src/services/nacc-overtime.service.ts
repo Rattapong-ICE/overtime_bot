@@ -4,6 +4,7 @@ import { mkdir } from 'node:fs/promises';
 import ExcelJS from 'exceljs';
 import { parse as parseCsv } from 'csv-parse/sync';
 import { UserNaccModel } from '../models/user-nacc.model';
+import { HolidayNaccModel } from '../models/holiday-nacc.model';
 
 export type NaccParsedRow = {
   employee_id: string;
@@ -36,8 +37,18 @@ type NaccOvertimeReportRow = {
   employeeId: string;
   checkInDateTime: string;
   checkOutDateTime: string;
+  workDate: string;
+  isOffDay: boolean;
   otHours: number;
   amount: number;
+};
+
+type NaccOvertimeMonthlySummaryRow = {
+  month: string;
+  employeeName: string;
+  employeeId: string;
+  totalOtHours: number;
+  totalAmount: number;
 };
 
 const NACC_OT_START_HOUR = 16;
@@ -46,7 +57,7 @@ const NACC_OT_CAP_HOUR = 20;
 const NACC_OT_CAP_MINUTE = 0;
 const NACC_OT_RATE_PER_HOUR = 50;
 const NACC_OT_CAP_AMOUNT = 200;
-const WEEKEND_ROW_FILL = 'FFF2F2F2';
+const OFF_DAY_ROW_FILL = 'FFC4C4C4';
 const NACC_WEEKEND_OT_START_HOUR = 8;
 const NACC_WEEKEND_OT_START_MINUTE = 30;
 const NACC_WEEKEND_OT_END_HOUR = 16;
@@ -325,6 +336,19 @@ function isWeekendDateTime(value: string): boolean {
   return isWeekendDate(parts.year, parts.month, parts.day);
 }
 
+function isWeekendDateText(dateText: string): boolean {
+  const [yearText, monthText, dayText] = dateText.split('-');
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
+    return false;
+  }
+
+  return isWeekendDate(year, month, day);
+}
+
 function buildDailyMinMaxRows(month: string, rows: NaccParsedRow[]): DailyMinMax[] {
   const monthPrefix = `${month}-`;
   const grouped = new Map<string, DailyMinMax>();
@@ -361,7 +385,11 @@ function buildDailyMinMaxRows(month: string, rows: NaccParsedRow[]): DailyMinMax
   return Array.from(grouped.values());
 }
 
-function calculateOtSummary(checkInDateTime: string, checkOutDateTime: string): { otHours: number; amount: number } {
+function calculateOtSummary(
+  checkInDateTime: string,
+  checkOutDateTime: string,
+  isOffDay: boolean
+): { otHours: number; amount: number } {
   const checkInParts = parseDateTimeParts(checkInDateTime);
   const checkOutParts = parseDateTimeParts(checkOutDateTime);
   if (!checkInParts || !checkOutParts) {
@@ -374,7 +402,7 @@ function calculateOtSummary(checkInDateTime: string, checkOutDateTime: string): 
     return { otHours: 0, amount: 0 };
   }
 
-  if (isWeekendDate(checkOutParts.year, checkOutParts.month, checkOutParts.day)) {
+  if (isOffDay) {
     const weekendWindowStartTs = Date.UTC(
       checkOutParts.year,
       checkOutParts.month - 1,
@@ -470,6 +498,12 @@ async function buildOvertimeReportRows(month: string, rows: NaccParsedRow[]): Pr
     return [];
   }
 
+  const enabledHolidayRows = await HolidayNaccModel.find({
+    enabled: true,
+    date: { $regex: `^${month}-` }
+  }).lean();
+  const holidayDateSet = new Set(enabledHolidayRows.map((holiday) => holiday.date));
+
   const employeeIds = Array.from(new Set(dailyRows.map((row) => row.employee_id)));
   const users = await UserNaccModel.find({
     employee_id: { $in: employeeIds }
@@ -479,7 +513,8 @@ async function buildOvertimeReportRows(month: string, rows: NaccParsedRow[]): Pr
 
   const reportRows = dailyRows
     .map((row) => {
-      const otSummary = calculateOtSummary(row.checkInDateTime, row.checkOutDateTime);
+      const isOffDay = isWeekendDateText(row.date) || holidayDateSet.has(row.date);
+      const otSummary = calculateOtSummary(row.checkInDateTime, row.checkOutDateTime, isOffDay);
       if (otSummary.amount <= 0) {
         return null;
       }
@@ -490,6 +525,8 @@ async function buildOvertimeReportRows(month: string, rows: NaccParsedRow[]): Pr
         employeeId: row.employee_id,
         checkInDateTime: row.checkInDateTime,
         checkOutDateTime: row.checkOutDateTime,
+        workDate: row.date,
+        isOffDay,
         otHours: otSummary.otHours,
         amount: otSummary.amount
       } as NaccOvertimeReportRow;
@@ -526,8 +563,34 @@ function applyHeaderStyle(cell: ExcelJS.Cell): void {
   applyCellBorder(cell);
 }
 
+function buildMonthlySummaryRows(month: string, reportRows: NaccOvertimeReportRow[]): NaccOvertimeMonthlySummaryRow[] {
+  const summaryMap = new Map<string, NaccOvertimeMonthlySummaryRow>();
+
+  for (const row of reportRows) {
+    const key = row.employeeId;
+    const current = summaryMap.get(key);
+
+    if (!current) {
+      summaryMap.set(key, {
+        month,
+        employeeName: row.employeeName,
+        employeeId: row.employeeId,
+        totalOtHours: row.otHours,
+        totalAmount: row.amount
+      });
+      continue;
+    }
+
+    current.totalOtHours += row.otHours;
+    current.totalAmount += row.amount;
+  }
+
+  return Array.from(summaryMap.values()).sort((left, right) => left.employeeId.localeCompare(right.employeeId));
+}
+
 export async function generateNaccOvertimeExcel(month: string, rows: NaccParsedRow[]): Promise<NaccOvertimeExcelResult> {
   const reportRows = await buildOvertimeReportRows(month, rows);
+  const summaryRows = buildMonthlySummaryRows(month, reportRows);
 
   const workbook = new ExcelJS.Workbook();
   const worksheet = workbook.addWorksheet('NACC Overtime');
@@ -559,7 +622,7 @@ export async function generateNaccOvertimeExcel(month: string, rows: NaccParsedR
       row.otHours,
       row.amount
     ]);
-    const isWeekendRow = isWeekendDateTime(row.checkInDateTime);
+    const isOffDayRow = row.isOffDay || isWeekendDateTime(row.checkInDateTime);
 
     for (let columnIndex = 1; columnIndex <= headers.length; columnIndex += 1) {
       const cell = excelRow.getCell(columnIndex);
@@ -569,13 +632,50 @@ export async function generateNaccOvertimeExcel(month: string, rows: NaccParsedR
         horizontal: columnIndex === 1 ? 'left' : 'center'
       };
 
-      if (isWeekendRow) {
+      if (isOffDayRow) {
         cell.fill = {
           type: 'pattern',
           pattern: 'solid',
-          fgColor: { argb: WEEKEND_ROW_FILL }
+          fgColor: { argb: OFF_DAY_ROW_FILL }
         };
       }
+    }
+  }
+
+  const summaryWorksheet = workbook.addWorksheet('NACC OT Summary');
+  summaryWorksheet.columns = [
+    { key: 'month', width: 12 },
+    { key: 'employeeName', width: 30 },
+    { key: 'employeeId', width: 12 },
+    { key: 'totalOtHours', width: 14 },
+    { key: 'totalAmount', width: 14 }
+  ];
+
+  const summaryHeaders = ['เดือน', 'ชื่อ พนักงาน', 'รหัส', 'รวมชม ot', 'รวมจำนวนเงิน'];
+  summaryWorksheet.addRow(summaryHeaders);
+
+  const summaryHeaderRow = summaryWorksheet.getRow(1);
+  summaryHeaderRow.height = 24;
+  for (let columnIndex = 1; columnIndex <= summaryHeaders.length; columnIndex += 1) {
+    applyHeaderStyle(summaryHeaderRow.getCell(columnIndex));
+  }
+
+  for (const row of summaryRows) {
+    const summaryExcelRow = summaryWorksheet.addRow([
+      row.month,
+      row.employeeName,
+      row.employeeId,
+      row.totalOtHours,
+      row.totalAmount
+    ]);
+
+    for (let columnIndex = 1; columnIndex <= summaryHeaders.length; columnIndex += 1) {
+      const cell = summaryExcelRow.getCell(columnIndex);
+      applyCellBorder(cell);
+      cell.alignment = {
+        vertical: 'middle',
+        horizontal: columnIndex === 2 ? 'left' : 'center'
+      };
     }
   }
 
