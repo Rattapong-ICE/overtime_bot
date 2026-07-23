@@ -63,6 +63,8 @@ const NACC_WEEKEND_OT_START_MINUTE = 30;
 const NACC_WEEKEND_OT_END_HOUR = 16;
 const NACC_WEEKEND_OT_END_MINUTE = 30;
 const NACC_WEEKEND_LUNCH_BREAK_MINUTES = 60;
+const NACC_LUNCH_WINDOW_START_MINUTES = 12 * 60;
+const NACC_LUNCH_WINDOW_END_MINUTES = 13 * 60;
 const NACC_WEEKEND_FULL_DAY_AMOUNT = 400;
 
 function normalizeCell(value: string | undefined): string {
@@ -349,6 +351,16 @@ function isWeekendDateText(dateText: string): boolean {
   return isWeekendDate(year, month, day);
 }
 
+function getUtcMinutesOfDay(timestamp: number): number {
+  const date = new Date(timestamp);
+  return (date.getUTCHours() * 60) + date.getUTCMinutes();
+}
+
+function isWithinLunchWindow(timestamp: number): boolean {
+  const minutesOfDay = getUtcMinutesOfDay(timestamp);
+  return minutesOfDay >= NACC_LUNCH_WINDOW_START_MINUTES && minutesOfDay <= NACC_LUNCH_WINDOW_END_MINUTES;
+}
+
 function buildDailyMinMaxRows(month: string, rows: NaccParsedRow[]): DailyMinMax[] {
   const monthPrefix = `${month}-`;
   const grouped = new Map<string, DailyMinMax>();
@@ -436,7 +448,11 @@ function calculateOtSummary(
     }
 
     const workedMinutesInWindow = Math.floor((effectiveEndTs - effectiveStartTs) / 60_000);
-    const payableMinutes = Math.max(0, workedMinutesInWindow - NACC_WEEKEND_LUNCH_BREAK_MINUTES);
+    const shouldDeductLunchBreak = isWithinLunchWindow(effectiveStartTs) && isWithinLunchWindow(effectiveEndTs);
+    const payableMinutes = Math.max(
+      0,
+      workedMinutesInWindow - (shouldDeductLunchBreak ? NACC_WEEKEND_LUNCH_BREAK_MINUTES : 0)
+    );
 
     if (payableMinutes < 60) {
       return { otHours: 0, amount: 0 };
