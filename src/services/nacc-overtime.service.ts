@@ -72,6 +72,9 @@ const NACC_WEEKEND_LUNCH_BREAK_MINUTES = 60;
 const NACC_LUNCH_WINDOW_START_MINUTES = 12 * 60;
 const NACC_LUNCH_WINDOW_END_MINUTES = 13 * 60;
 const NACC_WEEKEND_FULL_DAY_AMOUNT = 400;
+const SUMMARY_RATE_50_FILL = 'FFEBCBFF';
+const SUMMARY_RATE_200_FILL = 'FFFF5AA5';
+const SUMMARY_RATE_400_FILL = 'FFF8C8C8';
 
 function normalizeCell(value: string | undefined): string {
   return (value ?? '').replace(/^\uFEFF/, '').trim();
@@ -586,6 +589,22 @@ function applyHeaderStyle(cell: ExcelJS.Cell): void {
   applyCellBorder(cell);
 }
 
+function getSummaryBucketFill(columnIndex: number): string | null {
+  if (columnIndex === 5 || columnIndex === 6) {
+    return SUMMARY_RATE_50_FILL;
+  }
+
+  if (columnIndex === 7 || columnIndex === 8) {
+    return SUMMARY_RATE_200_FILL;
+  }
+
+  if (columnIndex === 9 || columnIndex === 10) {
+    return SUMMARY_RATE_400_FILL;
+  }
+
+  return null;
+}
+
 function buildMonthlySummaryRows(month: string, reportRows: NaccOvertimeReportRow[]): NaccOvertimeMonthlySummaryRow[] {
   const summaryMap = new Map<string, NaccOvertimeMonthlySummaryRow>();
 
@@ -727,7 +746,18 @@ export async function generateNaccOvertimeExcel(month: string, rows: NaccParsedR
   const summaryHeaderRow = summaryWorksheet.getRow(1);
   summaryHeaderRow.height = 24;
   for (let columnIndex = 1; columnIndex <= summaryHeaders.length; columnIndex += 1) {
-    applyHeaderStyle(summaryHeaderRow.getCell(columnIndex));
+    const headerCell = summaryHeaderRow.getCell(columnIndex);
+    applyHeaderStyle(headerCell);
+
+    const bucketFill = getSummaryBucketFill(columnIndex);
+    if (bucketFill) {
+      headerCell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: bucketFill }
+      };
+      headerCell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    }
   }
 
   for (const [index, row] of summaryRows.entries()) {
@@ -749,6 +779,16 @@ export async function generateNaccOvertimeExcel(month: string, rows: NaccParsedR
     for (let columnIndex = 1; columnIndex <= summaryHeaders.length; columnIndex += 1) {
       const cell = summaryExcelRow.getCell(columnIndex);
       applyCellBorder(cell);
+
+      const bucketFill = getSummaryBucketFill(columnIndex);
+      if (bucketFill) {
+        cell.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: bucketFill }
+        };
+      }
+
       cell.alignment = {
         vertical: 'middle',
         horizontal: columnIndex === 3 ? 'left' : 'center'
