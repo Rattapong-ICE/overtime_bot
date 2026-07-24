@@ -617,13 +617,15 @@ function buildMonthlySummaryRows(month: string, reportRows: NaccOvertimeReportRo
       continue;
     }
 
+    const isWeekdayWorkDate = !isWeekendDateText(row.workDate);
+
     if (row.isOffDay && row.amount === NACC_WEEKEND_FULL_DAY_AMOUNT) {
       summaryRow.rate400Hours += 1;
       summaryRow.rate400Amount += row.amount;
       continue;
     }
 
-    if (!row.isOffDay && row.amount === NACC_OT_CAP_AMOUNT) {
+    if (isWeekdayWorkDate && !row.isOffDay && row.amount === NACC_OT_CAP_AMOUNT) {
       summaryRow.rate200Hours += 1;
       summaryRow.rate200Amount += row.amount;
       continue;
