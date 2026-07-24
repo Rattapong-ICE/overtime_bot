@@ -362,9 +362,10 @@ function getUtcMinutesOfDay(timestamp: number): number {
   return (date.getUTCHours() * 60) + date.getUTCMinutes();
 }
 
-function isWithinLunchWindow(timestamp: number): boolean {
-  const minutesOfDay = getUtcMinutesOfDay(timestamp);
-  return minutesOfDay >= NACC_LUNCH_WINDOW_START_MINUTES && minutesOfDay <= NACC_LUNCH_WINDOW_END_MINUTES;
+function overlapsLunchWindow(startTimestamp: number, endTimestamp: number): boolean {
+  const startMinutesOfDay = getUtcMinutesOfDay(startTimestamp);
+  const endMinutesOfDay = getUtcMinutesOfDay(endTimestamp);
+  return startMinutesOfDay < NACC_LUNCH_WINDOW_END_MINUTES && endMinutesOfDay > NACC_LUNCH_WINDOW_START_MINUTES;
 }
 
 function buildDailyMinMaxRows(month: string, rows: NaccParsedRow[]): DailyMinMax[] {
@@ -454,7 +455,7 @@ function calculateOtSummary(
     }
 
     const workedMinutesInWindow = Math.floor((effectiveEndTs - effectiveStartTs) / 60_000);
-    const shouldDeductLunchBreak = isWithinLunchWindow(effectiveStartTs) && isWithinLunchWindow(effectiveEndTs);
+    const shouldDeductLunchBreak = overlapsLunchWindow(effectiveStartTs, effectiveEndTs);
     const payableMinutes = Math.max(
       0,
       workedMinutesInWindow - (shouldDeductLunchBreak ? NACC_WEEKEND_LUNCH_BREAK_MINUTES : 0)
