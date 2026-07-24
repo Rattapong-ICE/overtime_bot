@@ -49,6 +49,12 @@ type NaccOvertimeMonthlySummaryRow = {
   employeeId: string;
   totalOtHours: number;
   totalAmount: number;
+  rate50Hours: number;
+  rate50Amount: number;
+  rate200Hours: number;
+  rate200Amount: number;
+  rate400Hours: number;
+  rate400Amount: number;
 };
 
 const NACC_OT_START_HOUR = 16;
@@ -57,7 +63,7 @@ const NACC_OT_CAP_HOUR = 20;
 const NACC_OT_CAP_MINUTE = 0;
 const NACC_OT_RATE_PER_HOUR = 50;
 const NACC_OT_CAP_AMOUNT = 200;
-const OFF_DAY_ROW_FILL = 'FFC4C4C4';
+const OFF_DAY_ROW_FILL = 'FFC4E2';
 const NACC_WEEKEND_OT_START_HOUR = 8;
 const NACC_WEEKEND_OT_START_MINUTE = 30;
 const NACC_WEEKEND_OT_END_HOUR = 16;
@@ -573,7 +579,7 @@ function applyHeaderStyle(cell: ExcelJS.Cell): void {
   cell.fill = {
     type: 'pattern',
     pattern: 'solid',
-    fgColor: { argb: 'FF1D4E89' }
+    fgColor: { argb: 'FF69B4' }
   };
   cell.alignment = { vertical: 'middle', horizontal: 'center' };
   applyCellBorder(cell);
@@ -592,13 +598,38 @@ function buildMonthlySummaryRows(month: string, reportRows: NaccOvertimeReportRo
         employeeName: row.employeeName,
         employeeId: row.employeeId,
         totalOtHours: row.otHours,
-        totalAmount: row.amount
+        totalAmount: row.amount,
+        rate50Hours: 0,
+        rate50Amount: 0,
+        rate200Hours: 0,
+        rate200Amount: 0,
+        rate400Hours: 0,
+        rate400Amount: 0
       });
+    } else {
+      current.totalOtHours += row.otHours;
+      current.totalAmount += row.amount;
+    }
+
+    const summaryRow = summaryMap.get(key);
+    if (!summaryRow) {
       continue;
     }
 
-    current.totalOtHours += row.otHours;
-    current.totalAmount += row.amount;
+    if (row.isOffDay && row.amount === NACC_WEEKEND_FULL_DAY_AMOUNT) {
+      summaryRow.rate400Hours += 1;
+      summaryRow.rate400Amount += row.amount;
+      continue;
+    }
+
+    if (!row.isOffDay && row.amount === NACC_OT_CAP_AMOUNT) {
+      summaryRow.rate200Hours += 1;
+      summaryRow.rate200Amount += row.amount;
+      continue;
+    }
+
+    summaryRow.rate50Hours += row.otHours;
+    summaryRow.rate50Amount += row.amount;
   }
 
   return Array.from(summaryMap.values()).sort((left, right) => left.employeeId.localeCompare(right.employeeId));
@@ -660,14 +691,34 @@ export async function generateNaccOvertimeExcel(month: string, rows: NaccParsedR
 
   const summaryWorksheet = workbook.addWorksheet('NACC OT Summary');
   summaryWorksheet.columns = [
+    { key: 'sequence', width: 10 },
     { key: 'month', width: 12 },
     { key: 'employeeName', width: 30 },
     { key: 'employeeId', width: 12 },
+    { key: 'rate50Hours', width: 12 },
+    { key: 'rate50Amount', width: 12 },
+    { key: 'rate200Hours', width: 12 },
+    { key: 'rate200Amount', width: 12 },
+    { key: 'rate400Hours', width: 12 },
+    { key: 'rate400Amount', width: 12 },
     { key: 'totalOtHours', width: 14 },
     { key: 'totalAmount', width: 14 }
   ];
 
-  const summaryHeaders = ['เดือน', 'ชื่อ พนักงาน', 'รหัส', 'รวมชม ot', 'รวมจำนวนเงิน'];
+  const summaryHeaders = [
+    'ลำดับ',
+    'เดือน',
+    'ชื่อ พนักงาน',
+    'รหัส',
+    '50/ชม',
+    '50/บาท',
+    '200/ชม',
+    '200/บาท',
+    '400/ชม',
+    '400/บาท',
+    'รวมชม ot',
+    'รวมจำนวนเงิน'
+  ];
   summaryWorksheet.addRow(summaryHeaders);
 
   const summaryHeaderRow = summaryWorksheet.getRow(1);
@@ -676,11 +727,18 @@ export async function generateNaccOvertimeExcel(month: string, rows: NaccParsedR
     applyHeaderStyle(summaryHeaderRow.getCell(columnIndex));
   }
 
-  for (const row of summaryRows) {
+  for (const [index, row] of summaryRows.entries()) {
     const summaryExcelRow = summaryWorksheet.addRow([
+      index + 1,
       row.month,
       row.employeeName,
       row.employeeId,
+      row.rate50Hours,
+      row.rate50Amount,
+      row.rate200Hours,
+      row.rate200Amount,
+      row.rate400Hours,
+      row.rate400Amount,
       row.totalOtHours,
       row.totalAmount
     ]);
@@ -690,7 +748,7 @@ export async function generateNaccOvertimeExcel(month: string, rows: NaccParsedR
       applyCellBorder(cell);
       cell.alignment = {
         vertical: 'middle',
-        horizontal: columnIndex === 2 ? 'left' : 'center'
+        horizontal: columnIndex === 3 ? 'left' : 'center'
       };
     }
   }
